@@ -31,6 +31,8 @@ export interface RingRecord {
   siteId: string;
   /** 调查批次 id */
   sessionId: string;
+  /** 未测原因（关账前检查时确认；无量度记录的个体必须登记） */
+  unmeasuredReason?: string;
   /** 备注 */
   remark?: string;
 }
@@ -43,6 +45,15 @@ export const COLOR_RING_PRESETS: string[] = ['无', '红-黄', '蓝-白', '绿-�
 
 export const BIRD_AGES: BirdAge[] = ['幼', '亚成', '成'];
 export const RING_STATUSES: RingStatus[] = ['初捕', '重捕', '回收'];
+
+/** 未测原因预设（关账前检查时可选择，也可自定义填写） */
+export const UNMEASURED_REASON_PRESETS: string[] = [
+  '个体挣扎剧烈，提前放飞',
+  '逃逸未测',
+  '状态不佳，优先放飞',
+  '时间不足',
+  '设备缺失',
+];
 
 export const STATUS_COLOR: Record<RingStatus, string> = {
   初捕: 'success',

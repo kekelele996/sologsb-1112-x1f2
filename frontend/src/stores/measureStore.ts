@@ -3,6 +3,15 @@ import { db } from '../utils/db';
 import { uid } from '../utils/id';
 import { toPlain } from '../utils/plain';
 import type { Morphometrics } from '../types/morphometrics';
+import { useRingStore } from './ringStore';
+import { useSessionStore } from './sessionStore';
+
+/** 环志所属批次已关账时，其量度只读（页面层已禁用入口，此处为兜底拦截） */
+function ringLocked(ringId: string): boolean {
+  const ring = useRingStore().rings.find((record) => record.id === ringId);
+  if (!ring) return false;
+  return useSessionStore().byId(ring.sessionId)?.closed ?? false;
+}
 
 export interface MorphInput {
   ringId: string;
@@ -46,7 +55,11 @@ export const useMeasureStore = defineStore('measure', {
       this.hydrated = true;
     },
 
-    async addMorph(input: MorphInput): Promise<Morphometrics> {
+    async addMorph(input: MorphInput): Promise<Morphometrics | undefined> {
+      if (ringLocked(input.ringId)) {
+        console.warn('[measureStore] 批次已关账，拒绝新增量度记录');
+        return undefined;
+      }
       const morph: Morphometrics = {
         id: uid('morph'),
         ringId: input.ringId,
@@ -68,12 +81,22 @@ export const useMeasureStore = defineStore('measure', {
     async updateMorph(id: string, patch: Partial<MorphInput>) {
       const current = this.morphs.find((morph) => morph.id === id);
       if (!current) return;
+      if (ringLocked(current.ringId)) {
+        console.warn('[measureStore] 批次已关账，拒绝修改量度记录');
+        return;
+      }
       const next: Morphometrics = { ...current, ...patch };
       await db.morphs.put(toPlain(next));
       this.morphs = this.morphs.map((morph) => (morph.id === id ? next : morph));
     },
 
     async removeMorph(id: string) {
+      const current = this.morphs.find((morph) => morph.id === id);
+      if (!current) return;
+      if (ringLocked(current.ringId)) {
+        console.warn('[measureStore] 批次已关账，拒绝删除量度记录');
+        return;
+      }
       await db.morphs.delete(id);
       this.morphs = this.morphs.filter((morph) => morph.id !== id);
     },

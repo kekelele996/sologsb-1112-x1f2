@@ -5,22 +5,28 @@ import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'elem
 import StatBadge from '../components/common/StatBadge.vue';
 import FilterBar from '../components/common/FilterBar.vue';
 import EmptyPanel from '../components/common/EmptyPanel.vue';
+import SessionCloseCheck from '../components/common/SessionCloseCheck.vue';
 import { useSessionStore } from '../stores/sessionStore';
 import { useSiteStore } from '../stores/siteStore';
 import { useRingStore } from '../stores/ringStore';
+import { useMeasureStore } from '../stores/measureStore';
 import { cloudText, type SessionStats, type SurveySession } from '../types/session';
 import { buildSessionStats } from '../utils/stats';
+import { formatDateTime } from '../utils/format';
 
 const route = useRoute();
 const sessionStore = useSessionStore();
 const siteStore = useSiteStore();
 const ringStore = useRingStore();
+const measureStore = useMeasureStore();
 
 const dialogVisible = ref(false);
 const editingId = ref('');
 // 批次统计弹窗的开关：仅在选中记录时为字符串 id，关闭时为 null。
 // 注意不要用空字符串占位——el-dialog 的 v-model 期望布尔值，非空字符串会被判定为打开。
 const detailId = ref<string | null>(null);
+// 关账前检查弹窗的开关，约定同 detailId
+const closeCheckId = ref<string | null>(null);
 const formRef = ref<FormInstance>();
 
 interface SessionForm {
@@ -62,7 +68,7 @@ const statsList = computed<SessionStats[]>(() =>
     .map((session) => buildSessionStats(session, ringStore.rings, siteStore.siteName(session.siteId)))
     .filter((item) => {
       if (siteParam.value && siteStore.siteName(item.session.siteId) !== siteParam.value) return false;
-      if (closedParam.value === '已关闭' && !item.session.closed) return false;
+      if (closedParam.value === '已关账' && !item.session.closed) return false;
       if (closedParam.value === '进行中' && item.session.closed) return false;
       return true;
     }),
@@ -77,6 +83,17 @@ const averageRecapture = computed(() => {
 const totalSpecies = computed(() => new Set(ringStore.rings.map((record) => record.speciesCn)).size);
 
 const detail = computed(() => statsList.value.find((item) => item.session.id === detailId.value));
+
+/** 详情弹窗中展示的未测原因（该批次确认过未测原因、且至今仍无量度的环志记录） */
+const detailUnmeasured = computed(() => {
+  if (!detail.value) return [];
+  const measuredIds = new Set(measureStore.morphs.map((morph) => morph.ringId));
+  return ringStore.rings.filter(
+    (record) => record.sessionId === detail.value!.session.id && record.unmeasuredReason && !measuredIds.has(record.id),
+  );
+});
+
+const closeCheckSession = computed(() => sessionStore.sessions.find((session) => session.id === closeCheckId.value));
 
 function openCreate() {
   editingId.value = '';
@@ -138,18 +155,13 @@ async function submit() {
   dialogVisible.value = false;
 }
 
-async function close(session: SurveySession) {
-  const stats = buildSessionStats(session, ringStore.rings, siteStore.siteName(session.siteId));
-  const confirmed = await ElMessageBox.confirm(
-    `关闭批次 ${session.sessionNo} 后出统计：鸟种 ${stats.speciesCount} 种、初捕 ${stats.firstCount}、重捕 ${stats.recaptureCount}。确认关闭？`,
-    '关闭批次',
-    { type: 'warning' },
-  )
-    .then(() => true)
-    .catch(() => false);
-  if (!confirmed) return;
-  await sessionStore.closeSession(session.id);
-  ElMessage.success(`批次 ${session.sessionNo} 已关闭`);
+/** 关账前检查：逐个核对未量度环志，全部处理完后才允许关账 */
+function openCloseCheck(session: SurveySession) {
+  closeCheckId.value = session.id;
+}
+
+function onClosed() {
+  closeCheckId.value = null;
 }
 
 async function remove(session: SurveySession) {
@@ -165,11 +177,11 @@ async function remove(session: SurveySession) {
 <template>
   <div>
     <h2 class="page-title">调查批次与观测条件</h2>
-    <p class="page-desc">登记批次号、鸟点、起止时间与云量风力；批次关闭后统计该批鸟种数、初捕数与重捕数。</p>
+    <p class="page-desc">登记批次号、鸟点、起止时间与云量风力；关账前逐个核对未量度环志并登记未测原因，全部处理后关账并固定鸟种数、初捕 / 重捕 / 回收数。</p>
 
     <div class="toolbar">
       <el-button type="primary" @click="openCreate">新建批次</el-button>
-      <el-tag type="info" effect="plain">批次 {{ sessionStore.sessions.length }} 个 · 已关闭 {{ closedCount }} 个</el-tag>
+      <el-tag type="info" effect="plain">批次 {{ sessionStore.sessions.length }} 个 · 已关账 {{ closedCount }} 个</el-tag>
     </div>
 
     <el-row :gutter="12" class="stat-row">
@@ -190,7 +202,7 @@ async function remove(session: SurveySession) {
     <FilterBar
       :fields="[
         { key: 'site', label: '鸟点', options: siteStore.sites.map((s) => s.name), width: 150 },
-        { key: 'closed', label: '状态', options: ['已关闭', '进行中'], width: 110 },
+        { key: 'closed', label: '状态', options: ['已关账', '进行中'], width: 110 },
       ]"
       keyword-placeholder="搜索批次号 / 主调查人"
       :result-count="statsList.length"
@@ -233,14 +245,14 @@ async function remove(session: SurveySession) {
         <el-table-column label="状态" width="90">
           <template #default="scope">
             <el-tag :type="scope.row.session.closed ? 'success' : 'warning'" size="small">
-              {{ scope.row.session.closed ? '已关闭' : '进行中' }}
+              {{ scope.row.session.closed ? '已关账' : '进行中' }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="230" fixed="right">
+        <el-table-column label="操作" width="240" fixed="right">
           <template #default="scope">
             <el-button link type="primary" @click="detailId = scope.row.session.id">统计</el-button>
-            <el-button v-if="!scope.row.session.closed" link type="warning" @click="close(scope.row.session)">关闭批次</el-button>
+            <el-button v-if="!scope.row.session.closed" link type="warning" @click="openCloseCheck(scope.row.session)">关账检查</el-button>
             <el-button link type="primary" @click="openEdit(scope.row.session)">编辑</el-button>
             <el-button link type="danger" @click="remove(scope.row.session)">删除</el-button>
           </template>
@@ -288,7 +300,7 @@ async function remove(session: SurveySession) {
       </template>
     </el-dialog>
 
-    <el-dialog v-if="detailId" :model-value="true" :title="`批次统计 · ${detail?.session.sessionNo ?? ''}`" width="560px" @close="detailId = null">
+    <el-dialog v-if="detailId" :model-value="true" :title="`批次统计 · ${detail?.session.sessionNo ?? ''}`" width="640px" @close="detailId = null">
       <template v-if="detail">
         <el-descriptions :column="2" border>
           <el-descriptions-item label="鸟点">{{ detail.siteName }}</el-descriptions-item>
@@ -303,12 +315,31 @@ async function remove(session: SurveySession) {
           <el-descriptions-item label="回收">{{ detail.recoveryCount }} 只</el-descriptions-item>
           <el-descriptions-item label="重捕率">{{ detail.recaptureRate }}%</el-descriptions-item>
           <el-descriptions-item label="主调查人">{{ detail.session.leader }}</el-descriptions-item>
+          <el-descriptions-item label="统计口径">
+            <el-tag :type="detail.session.closed ? 'success' : 'warning'" size="small" effect="plain">
+              {{ detail.session.closed ? '关账时固定' : '实时统计 · 关账后固定' }}
+            </el-tag>
+          </el-descriptions-item>
+          <el-descriptions-item v-if="detail.session.closedAt" label="关账时间">
+            {{ formatDateTime(detail.session.closedAt) }}
+          </el-descriptions-item>
         </el-descriptions>
+
+        <template v-if="detailUnmeasured.length">
+          <el-divider content-position="left">未测原因（{{ detailUnmeasured.length }} 只）</el-divider>
+          <el-table :data="detailUnmeasured" size="small" border>
+            <el-table-column prop="ringNo" label="金属环号" width="110" />
+            <el-table-column prop="speciesCn" label="鸟种" width="110" />
+            <el-table-column prop="unmeasuredReason" label="未测原因" show-overflow-tooltip />
+          </el-table>
+        </template>
       </template>
       <template #footer>
         <el-button type="primary" @click="detailId = null">关闭</el-button>
       </template>
     </el-dialog>
+
+    <SessionCloseCheck v-if="closeCheckSession" :session="closeCheckSession" @close="closeCheckId = null" @closed="onClosed" />
   </div>
 </template>
 

@@ -2,7 +2,7 @@ import { defineStore } from 'pinia';
 import { db } from '../utils/db';
 import { uid } from '../utils/id';
 import { toPlain } from '../utils/plain';
-import type { SurveySession } from '../types/session';
+import type { SessionClosedStats, SurveySession } from '../types/session';
 
 export interface SessionInput {
   sessionNo: string;
@@ -32,7 +32,7 @@ export const useSessionStore = defineStore('session', {
     },
     sessionOptions(state): Array<{ label: string; value: string }> {
       return state.sessions.map((session) => ({
-        label: `${session.sessionNo} · ${session.date} · ${session.closed ? '已关闭' : '进行中'}`,
+        label: `${session.sessionNo} · ${session.date} · ${session.closed ? '已关账' : '进行中'}`,
         value: session.id,
       }));
     },
@@ -75,11 +75,17 @@ export const useSessionStore = defineStore('session', {
       this.sessions = this.sessions.map((session) => (session.id === id ? next : session));
     },
 
-    /** 关闭批次后出统计 */
-    async closeSession(id: string) {
+    /** 关账：写入关账时间并固定统计快照（关账后该批环志与量度只读） */
+    async closeSession(id: string, stats: SessionClosedStats) {
       const current = this.sessions.find((session) => session.id === id);
-      if (!current) return;
-      const next: SurveySession = { ...current, closed: true, endedAt: current.endedAt || new Date().toTimeString().slice(0, 5) };
+      if (!current || current.closed) return;
+      const next: SurveySession = {
+        ...current,
+        closed: true,
+        closedAt: new Date().toISOString(),
+        closedStats: { ...stats },
+        endedAt: current.endedAt || new Date().toTimeString().slice(0, 5),
+      };
       await db.sessions.put(toPlain(next));
       this.sessions = this.sessions.map((session) => (session.id === id ? next : session));
     },

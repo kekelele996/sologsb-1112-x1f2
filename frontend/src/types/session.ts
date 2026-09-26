@@ -1,3 +1,15 @@
+/** 关账时固定的统计快照（关账后不再随补录变化） */
+export interface SessionClosedStats {
+  /** 鸟种数 */
+  speciesCount: number;
+  /** 初捕数 */
+  firstCount: number;
+  /** 重捕数 */
+  recaptureCount: number;
+  /** 回收数 */
+  recoveryCount: number;
+}
+
 /** 调查批次 */
 export interface SurveySession {
   id: string;
@@ -17,8 +29,12 @@ export interface SurveySession {
   cloudCover: number;
   /** 风力（级） */
   windForce: number;
-  /** 是否已关闭（关闭后出统计） */
+  /** 是否已关账（关账后统计固定，该批环志与量度只读） */
   closed: boolean;
+  /** 关账时间 ISO（关账时写入） */
+  closedAt?: string;
+  /** 关账时固定的统计快照 */
+  closedStats?: SessionClosedStats;
   /** 主调查人 */
   leader: string;
   /** 备注 */

@@ -20,9 +20,51 @@ export const SEED_SITES: BirdSite[] = [
 ];
 
 export const SEED_SESSIONS: SurveySession[] = [
-  { id: 'session-001', sessionNo: '2024-A01', date: dateDaysAgo(21), siteId: 'site-001', startedAt: '05:00', endedAt: '11:00', netRounds: 6, cloudCover: 2, windForce: 2, closed: true, leader: '韩雪' },
-  { id: 'session-002', sessionNo: '2024-A02', date: dateDaysAgo(14), siteId: 'site-002', startedAt: '05:20', endedAt: '11:30', netRounds: 6, cloudCover: 5, windForce: 3, closed: true, leader: '韩雪' },
-  { id: 'session-003', sessionNo: '2024-A03', date: dateDaysAgo(7), siteId: 'site-003', startedAt: '05:10', endedAt: '11:00', netRounds: 6, cloudCover: 1, windForce: 2, closed: true, leader: '郑海' },
+  {
+    id: 'session-001',
+    sessionNo: '2024-A01',
+    date: dateDaysAgo(21),
+    siteId: 'site-001',
+    startedAt: '05:00',
+    endedAt: '11:00',
+    netRounds: 6,
+    cloudCover: 2,
+    windForce: 2,
+    closed: true,
+    closedAt: isoDaysAgo(21),
+    closedStats: { speciesCount: 4, firstCount: 4, recaptureCount: 1, recoveryCount: 0 },
+    leader: '韩雪',
+  },
+  {
+    id: 'session-002',
+    sessionNo: '2024-A02',
+    date: dateDaysAgo(14),
+    siteId: 'site-002',
+    startedAt: '05:20',
+    endedAt: '11:30',
+    netRounds: 6,
+    cloudCover: 5,
+    windForce: 3,
+    closed: true,
+    closedAt: isoDaysAgo(14),
+    closedStats: { speciesCount: 2, firstCount: 3, recaptureCount: 0, recoveryCount: 0 },
+    leader: '韩雪',
+  },
+  {
+    id: 'session-003',
+    sessionNo: '2024-A03',
+    date: dateDaysAgo(7),
+    siteId: 'site-003',
+    startedAt: '05:10',
+    endedAt: '11:00',
+    netRounds: 6,
+    cloudCover: 1,
+    windForce: 2,
+    closed: true,
+    closedAt: isoDaysAgo(7),
+    closedStats: { speciesCount: 6, firstCount: 5, recaptureCount: 1, recoveryCount: 0 },
+    leader: '郑海',
+  },
   { id: 'session-004', sessionNo: '2024-A04', date: dateDaysAgo(2), siteId: 'site-001', startedAt: '05:30', endedAt: '11:00', netRounds: 6, cloudCover: 8, windForce: 4, closed: false, leader: '郑海', remark: '风力偏大，网次仅完成 4 次' },
 ];
 
@@ -79,6 +121,16 @@ export const SEED_RINGS: RingRecord[] = [
   ring(17, 'A-10099', '无', '红喉歌鸲', '成', 'session-004', 'site-001', '3 号网', 3, '回收', '郑海', 2, '回收自外站环志个体'),
   ring(18, 'C-30103', '无', '黄鹡鸰', '幼', 'session-004', 'site-001', '6 号网', 4, '初捕', '韩雪', 2),
 ];
+
+// 已关账批次（session-003）中未量度个体的未测原因：关账前检查时逐条确认过
+const SEED_UNMEASURED_REASONS: Record<string, string> = {
+  'ring-013': '个体挣扎剧烈，安全检查后提前放飞',
+  'ring-014': '跨点重捕，时间不足未测量',
+};
+SEED_RINGS.forEach((record) => {
+  const reason = SEED_UNMEASURED_REASONS[record.id];
+  if (reason) record.unmeasuredReason = reason;
+});
 
 function morph(
   index: number,

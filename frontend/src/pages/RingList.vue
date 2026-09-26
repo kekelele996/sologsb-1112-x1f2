@@ -91,6 +91,9 @@ const existedHistory = computed(() => (existedRecord.value ? ringStore.historyOf
 
 const entityOptions = computed(() => speciesCount(ringStore.rings).map((item) => item.speciesCn));
 
+/** 所属批次已关账的记录只读（不可编辑 / 删除） */
+const locked = (record: RingRecord) => sessionStore.byId(record.sessionId)?.closed ?? false;
+
 function openCreate() {
   editingId.value = '';
   formRef.value?.clearValidate();
@@ -106,7 +109,7 @@ function openCreate() {
     status: '初捕',
     ringer: '韩雪',
     siteId: siteStore.sites[0]?.id ?? '',
-    sessionId: sessionStore.sessions[0]?.id ?? '',
+    sessionId: sessionStore.openSessions[0]?.id ?? '',
     remark: '',
   };
   dialogVisible.value = true;
@@ -230,11 +233,14 @@ const historyRows = computed(() => ringStore.historyOf(historyRingNo.value));
         <el-table-column label="鸟点" width="140">
           <template #default="scope">{{ siteStore.siteName(scope.row.siteId) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="200" fixed="right">
+        <el-table-column label="操作" width="230" fixed="right">
           <template #default="scope">
             <el-button link type="primary" @click="showHistory(scope.row.ringNo)">历史</el-button>
-            <el-button link type="primary" @click="openEdit(scope.row)">编辑</el-button>
-            <el-button link type="danger" @click="remove(scope.row)">删除</el-button>
+            <el-button link type="primary" :disabled="locked(scope.row)" @click="openEdit(scope.row)">编辑</el-button>
+            <el-button link type="danger" :disabled="locked(scope.row)" @click="remove(scope.row)">删除</el-button>
+            <el-tooltip v-if="locked(scope.row)" content="批次已关账，记录只读" placement="top">
+              <el-tag type="info" size="small" effect="plain" class="lock-tag">已关账</el-tag>
+            </el-tooltip>
           </template>
         </el-table-column>
       </el-table>
@@ -291,8 +297,8 @@ const historyRows = computed(() => ringStore.historyOf(historyRingNo.value));
           </el-select>
         </el-form-item>
         <el-form-item label="调查批次">
-          <el-select v-model="form.sessionId" style="width: 240px">
-            <el-option v-for="session in sessionStore.sessions" :key="session.id" :label="`${session.sessionNo} · ${session.date}`" :value="session.id" />
+          <el-select v-model="form.sessionId" style="width: 240px" placeholder="仅可选择进行中的批次">
+            <el-option v-for="session in sessionStore.openSessions" :key="session.id" :label="`${session.sessionNo} · ${session.date}`" :value="session.id" />
           </el-select>
         </el-form-item>
         <el-form-item label="备注">
@@ -306,7 +312,7 @@ const historyRows = computed(() => ringStore.historyOf(historyRingNo.value));
       </template>
     </el-dialog>
 
-    <el-dialog v-model="historyVisible" :title="`环号历史记录 · ${historyRingNo}`" width="720px">
+    <el-dialog v-model="historyVisible" :title="`环号历史记录 · ${historyRingNo}`" width="820px">
       <el-table :data="historyRows" size="small" border>
         <el-table-column prop="ringNo" label="环号" width="110" />
         <el-table-column prop="speciesCn" label="鸟种" width="110" />
@@ -316,6 +322,9 @@ const historyRows = computed(() => ringStore.historyOf(historyRingNo.value));
         <el-table-column prop="status" label="状态" width="90" />
         <el-table-column prop="netNo" label="网号" width="100" />
         <el-table-column prop="ringer" label="环志人" width="90" />
+        <el-table-column label="未测原因" width="150" show-overflow-tooltip>
+          <template #default="scope">{{ scope.row.unmeasuredReason ?? '—' }}</template>
+        </el-table-column>
         <el-table-column prop="remark" label="备注" show-overflow-tooltip />
       </el-table>
       <template #footer>
@@ -348,5 +357,9 @@ const historyRows = computed(() => ringStore.historyOf(historyRingNo.value));
 }
 .ring-form {
   margin-top: 10px;
+}
+.lock-tag {
+  margin-left: 4px;
+  vertical-align: middle;
 }
 </style>
