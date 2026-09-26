@@ -2,6 +2,7 @@ import { defineStore } from 'pinia';
 import { db } from '../utils/db';
 import { uid } from '../utils/id';
 import { toPlain } from '../utils/plain';
+import { useSessionStore } from './sessionStore';
 import type { BirdAge, RingRecord, RingStatus } from '../types/ring-record';
 
 export interface RingInput {
@@ -60,6 +61,8 @@ export const useRingStore = defineStore('ring', {
 
     /** 新增环志记录：环号已存在时返回命中的历史记录，由页面提示并跳转 */
     async addRing(input: RingInput): Promise<{ record?: RingRecord; duplicate?: RingRecord }> {
+      const sessionStore = useSessionStore();
+      sessionStore.assertOpen(input.sessionId);
       const existed = this.findByRingNo(input.ringNo);
       if (existed) {
         this.duplicateId = existed.id;
@@ -90,14 +93,31 @@ export const useRingStore = defineStore('ring', {
     async updateRing(id: string, patch: Partial<RingInput>) {
       const current = this.rings.find((record) => record.id === id);
       if (!current) return;
+      const sessionStore = useSessionStore();
+      sessionStore.assertOpen(current.sessionId);
       const next: RingRecord = { ...current, ...patch };
       await db.rings.put(toPlain(next));
       this.rings = this.rings.map((record) => (record.id === id ? next : record));
     },
 
     async removeRing(id: string) {
+      const current = this.rings.find((record) => record.id === id);
+      if (!current) return;
+      const sessionStore = useSessionStore();
+      sessionStore.assertOpen(current.sessionId);
       await db.rings.delete(id);
       this.rings = this.rings.filter((record) => record.id !== id);
+    },
+
+    /** 关账前检查：给未量度个体登记未测原因（空字符串表示清除，仅限进行中批次） */
+    async setUnmeasuredReason(id: string, reason: string) {
+      const current = this.rings.find((record) => record.id === id);
+      if (!current) return;
+      const sessionStore = useSessionStore();
+      sessionStore.assertOpen(current.sessionId);
+      const next: RingRecord = { ...current, unmeasuredReason: reason.trim() || undefined };
+      await db.rings.put(toPlain(next));
+      this.rings = this.rings.map((record) => (record.id === id ? next : record));
     },
   },
 });

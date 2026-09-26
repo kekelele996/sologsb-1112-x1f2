@@ -1,7 +1,7 @@
 import type { MeasureDeviation, MeasureKey, Morphometrics } from '../types/morphometrics';
 import { MEASURE_FIELDS } from '../types/morphometrics';
 import type { RingRecord, RingStatus } from '../types/ring-record';
-import type { SessionStats, SurveySession } from '../types/session';
+import type { ClosedSessionSnapshot, SessionStats, SurveySession } from '../types/session';
 
 /** 常见环志鸟种目录（中文名 + 学名），供 SpeciesPicker 联想与自定义补充 */
 export const SPECIES_CATALOG: Array<{ cn: string; sci: string }> = [
@@ -71,19 +71,87 @@ export function recaptureRate(records: RingRecord[]): number {
   return base > 0 ? Number(((recaptured / base) * 100).toFixed(1)) : 0;
 }
 
-/** 批次统计：鸟种数、初捕数与重捕数 */
-export function buildSessionStats(session: SurveySession, records: RingRecord[], siteName: string): SessionStats {
-  const scoped = records.filter((record) => record.sessionId === session.id);
-  const breakdown = statusBreakdown(scoped);
+/** 批次核心统计（鸟种数 / 初捕 / 重捕 / 回收 / 重捕率），实时值与关账快照共用 */
+export function summarizeRings(records: RingRecord[]): Omit<ClosedSessionSnapshot, 'measuredCount' | 'unmeasuredCount'> {
+  const breakdown = statusBreakdown(records);
   const base = breakdown.初捕 + breakdown.重捕;
   return {
-    session,
-    siteName,
-    speciesCount: new Set(scoped.map((record) => record.speciesCn)).size,
+    speciesCount: new Set(records.map((record) => record.speciesCn)).size,
     firstCount: breakdown.初捕,
     recaptureCount: breakdown.重捕,
     recoveryCount: breakdown.回收,
     recaptureRate: base > 0 ? Number(((breakdown.重捕 / base) * 100).toFixed(1)) : 0,
+    ringCount: records.length,
+  };
+}
+
+/** 某批次的环志个体 */
+export function ringsOfSession(sessionId: string, records: RingRecord[]): RingRecord[] {
+  return records.filter((record) => record.sessionId === sessionId);
+}
+
+/** 已量度的环志 id 集合（一条环志只要存在量度记录即算已量度） */
+export function measuredRingIds(morphs: Morphometrics[]): Set<string> {
+  return new Set(morphs.map((morph) => morph.ringId));
+}
+
+/** 还没有量度的环志（关账前必须逐个确认：补录量度或填写未测原因） */
+export function unmeasuredRingsOfSession(
+  sessionId: string,
+  records: RingRecord[],
+  morphs: Morphometrics[],
+): RingRecord[] {
+  const measured = measuredRingIds(morphs);
+  return ringsOfSession(sessionId, records).filter((record) => !measured.has(record.id));
+}
+
+/** 关账前置检查未完成的个体：既无量度、也未填未测原因 */
+export function pendingRingsOfSession(
+  sessionId: string,
+  records: RingRecord[],
+  morphs: Morphometrics[],
+): RingRecord[] {
+  return unmeasuredRingsOfSession(sessionId, records, morphs).filter((record) => !record.unmeasuredReason);
+}
+
+/** 计算关账时固定的统计快照 */
+export function buildClosedSnapshot(
+  sessionId: string,
+  records: RingRecord[],
+  morphs: Morphometrics[],
+): ClosedSessionSnapshot {
+  const scoped = ringsOfSession(sessionId, records);
+  const measured = measuredRingIds(morphs);
+  const unmeasured = scoped.filter((record) => !measured.has(record.id));
+  return {
+    ...summarizeRings(scoped),
+    measuredCount: scoped.length - unmeasured.length,
+    unmeasuredCount: unmeasured.length,
+  };
+}
+
+/** 批次统计：已关账批次返回关账快照，进行中批次返回实时值 */
+export function buildSessionStats(session: SurveySession, records: RingRecord[], siteName: string): SessionStats {
+  if (session.closed && session.closedStats) {
+    return {
+      session,
+      siteName,
+      speciesCount: session.closedStats.speciesCount,
+      firstCount: session.closedStats.firstCount,
+      recaptureCount: session.closedStats.recaptureCount,
+      recoveryCount: session.closedStats.recoveryCount,
+      recaptureRate: session.closedStats.recaptureRate,
+    };
+  }
+  const summary = summarizeRings(records.filter((record) => record.sessionId === session.id));
+  return {
+    session,
+    siteName,
+    speciesCount: summary.speciesCount,
+    firstCount: summary.firstCount,
+    recaptureCount: summary.recaptureCount,
+    recoveryCount: summary.recoveryCount,
+    recaptureRate: summary.recaptureRate,
   };
 }
 

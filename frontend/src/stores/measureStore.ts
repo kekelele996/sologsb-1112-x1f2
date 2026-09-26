@@ -2,6 +2,8 @@ import { defineStore } from 'pinia';
 import { db } from '../utils/db';
 import { uid } from '../utils/id';
 import { toPlain } from '../utils/plain';
+import { useRingStore } from './ringStore';
+import { useSessionStore } from './sessionStore';
 import type { Morphometrics } from '../types/morphometrics';
 
 export interface MorphInput {
@@ -47,6 +49,10 @@ export const useMeasureStore = defineStore('measure', {
     },
 
     async addMorph(input: MorphInput): Promise<Morphometrics> {
+      const ringStore = useRingStore();
+      const sessionStore = useSessionStore();
+      const ring = ringStore.rings.find((record) => record.id === input.ringId);
+      if (ring) sessionStore.assertOpen(ring.sessionId);
       const morph: Morphometrics = {
         id: uid('morph'),
         ringId: input.ringId,
@@ -62,18 +68,32 @@ export const useMeasureStore = defineStore('measure', {
       };
       await db.morphs.put(toPlain(morph));
       this.morphs = [morph, ...this.morphs];
+      // 补足量度后该个体不再是「未测」，清掉关账前检查时登记的未测原因
+      if (ring?.unmeasuredReason) {
+        await ringStore.setUnmeasuredReason(ring.id, '');
+      }
       return morph;
     },
 
     async updateMorph(id: string, patch: Partial<MorphInput>) {
       const current = this.morphs.find((morph) => morph.id === id);
       if (!current) return;
+      const ringStore = useRingStore();
+      const sessionStore = useSessionStore();
+      const ring = ringStore.rings.find((record) => record.id === current.ringId);
+      if (ring) sessionStore.assertOpen(ring.sessionId);
       const next: Morphometrics = { ...current, ...patch };
       await db.morphs.put(toPlain(next));
       this.morphs = this.morphs.map((morph) => (morph.id === id ? next : morph));
     },
 
     async removeMorph(id: string) {
+      const current = this.morphs.find((morph) => morph.id === id);
+      if (!current) return;
+      const ringStore = useRingStore();
+      const sessionStore = useSessionStore();
+      const ring = ringStore.rings.find((record) => record.id === current.ringId);
+      if (ring) sessionStore.assertOpen(ring.sessionId);
       await db.morphs.delete(id);
       this.morphs = this.morphs.filter((morph) => morph.id !== id);
     },

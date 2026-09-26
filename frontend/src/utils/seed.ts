@@ -3,7 +3,7 @@ import type { BirdSite } from '../types/bird-site';
 import type { SurveySession } from '../types/session';
 import type { RingRecord } from '../types/ring-record';
 import type { Morphometrics } from '../types/morphometrics';
-import { SPECIES_CATALOG } from './stats';
+import { buildClosedSnapshot, SPECIES_CATALOG } from './stats';
 
 const DAY = 86_400_000;
 const isoDaysAgo = (n: number) => new Date(Date.now() - n * DAY).toISOString();
@@ -40,6 +40,7 @@ function ring(
   ringer: string,
   days: number,
   remark?: string,
+  unmeasuredReason?: string,
 ): RingRecord {
   return {
     id: `ring-${String(index).padStart(3, '0')}`,
@@ -55,6 +56,7 @@ function ring(
     ringer,
     siteId,
     sessionId,
+    unmeasuredReason,
     remark,
   };
 }
@@ -72,8 +74,8 @@ export const SEED_RINGS: RingRecord[] = [
   ring(10, 'B-20512', '黑-红', '大山雀', '成', 'session-003', 'site-003', '8 号网', 2, '初捕', '郑海', 7),
   ring(11, 'B-20513', '无', '黄眉柳莺', '幼', 'session-003', 'site-003', '6 号网', 2, '初捕', '郑海', 7),
   ring(12, 'B-20514', '无', '沼泽山雀', '成', 'session-003', 'site-003', '9 号网', 3, '初捕', '韩雪', 7),
-  ring(13, 'B-20515', '无', '灰喜鹊', '成', 'session-003', 'site-003', '10 号网', 4, '初捕', '韩雪', 7),
-  ring(14, 'A-10231', '红-黄', '红喉歌鸲', '成', 'session-003', 'site-003', '6 号网', 5, '重捕', '郑海', 7, 'A-10231 跨点重捕，位移约 30km'),
+  ring(13, 'B-20515', '无', '灰喜鹊', '成', 'session-003', 'site-003', '10 号网', 4, '初捕', '韩雪', 7, undefined, '伤重逃逸'),
+  ring(14, 'A-10231', '红-黄', '红喉歌鸲', '成', 'session-003', 'site-003', '6 号网', 5, '重捕', '郑海', 7, 'A-10231 跨点重捕，位移约 30km', '雨天羽毛湿透未测'),
   ring(15, 'C-30101', '无', '白眉鹀', '亚成', 'session-004', 'site-001', '4 号网', 1, '初捕', '郑海', 2),
   ring(16, 'C-30102', '无', '北红尾鸲', '成', 'session-004', 'site-001', '5 号网', 2, '初捕', '郑海', 2),
   ring(17, 'A-10099', '无', '红喉歌鸲', '成', 'session-004', 'site-001', '3 号网', 3, '回收', '郑海', 2, '回收自外站环志个体'),
@@ -140,7 +142,19 @@ export async function seedIfEmpty(): Promise<void> {
 
   await db.transaction('rw', db.rings, db.morphs, db.sites, db.sessions, db.meta, async () => {
     if (siteCount === 0) await db.sites.bulkPut(SEED_SITES);
-    if (sessionCount === 0) await db.sessions.bulkPut(SEED_SESSIONS);
+    if (sessionCount === 0) {
+      // 已关账的示例批次直接带关账时间与固定统计快照
+      const sessions = SEED_SESSIONS.map((session) =>
+        session.closed
+          ? {
+              ...session,
+              closedAt: new Date(`${session.date}T${session.endedAt}:00`).toISOString(),
+              closedStats: buildClosedSnapshot(session.id, SEED_RINGS, SEED_MORPHS),
+            }
+          : session,
+      );
+      await db.sessions.bulkPut(sessions);
+    }
     if (ringCount === 0) await db.rings.bulkPut(SEED_RINGS);
     if (morphCount === 0) await db.morphs.bulkPut(SEED_MORPHS);
     await db.meta.put({ key: 'seeded', value: new Date().toISOString() });

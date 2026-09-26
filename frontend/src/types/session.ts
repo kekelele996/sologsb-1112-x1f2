@@ -19,10 +19,34 @@ export interface SurveySession {
   windForce: number;
   /** 是否已关闭（关闭后出统计） */
   closed: boolean;
+  /** 关账时间 ISO（关账时固定） */
+  closedAt?: string;
+  /** 关账时固定的统计快照（关账后统计不再随后续补录变化） */
+  closedStats?: ClosedSessionSnapshot;
   /** 主调查人 */
   leader: string;
   /** 备注 */
   remark?: string;
+}
+
+/** 关账时固定的批次统计快照 */
+export interface ClosedSessionSnapshot {
+  /** 鸟种数 */
+  speciesCount: number;
+  /** 初捕数 */
+  firstCount: number;
+  /** 重捕数 */
+  recaptureCount: number;
+  /** 回收数 */
+  recoveryCount: number;
+  /** 重捕率（%，重捕 / (初捕 + 重捕)） */
+  recaptureRate: number;
+  /** 关账时已记录的环志个体总数 */
+  ringCount: number;
+  /** 关账时已量度个体数 */
+  measuredCount: number;
+  /** 关账时未量度但已填写原因的个体数 */
+  unmeasuredCount: number;
 }
 
 /** 批次统计派生值 */

@@ -9,6 +9,7 @@ import SpeciesPicker from '../components/common/SpeciesPicker.vue';
 import { useRingStore } from '../stores/ringStore';
 import { useSiteStore } from '../stores/siteStore';
 import { useSessionStore } from '../stores/sessionStore';
+import { useMeasureStore } from '../stores/measureStore';
 import { BIRD_AGES, RING_STATUSES, STATUS_COLOR, type BirdAge, type RingRecord, type RingStatus } from '../types/ring-record';
 import { formatDate } from '../utils/format';
 import { speciesCount } from '../utils/stats';
@@ -17,6 +18,7 @@ const route = useRoute();
 const ringStore = useRingStore();
 const siteStore = useSiteStore();
 const sessionStore = useSessionStore();
+const measureStore = useMeasureStore();
 
 const dialogVisible = ref(false);
 const editingId = ref('');
@@ -91,6 +93,21 @@ const existedHistory = computed(() => (existedRecord.value ? ringStore.historyOf
 
 const entityOptions = computed(() => speciesCount(ringStore.rings).map((item) => item.speciesCn));
 
+/** 批次下拉：新建只列进行中批次；编辑时补上本条记录所属（可能已关账）批次 */
+const selectableSessions = computed(() => {
+  const ownId = editingId.value ? ringStore.rings.find((record) => record.id === editingId.value)?.sessionId : '';
+  const list = [...sessionStore.openSessions];
+  if (ownId && !list.some((session) => session.id === ownId)) {
+    const own = sessionStore.byId(ownId);
+    if (own) list.push(own);
+  }
+  return list;
+});
+
+function isLocked(record: RingRecord): boolean {
+  return Boolean(sessionStore.byId(record.sessionId)?.closed);
+}
+
 function openCreate() {
   editingId.value = '';
   formRef.value?.clearValidate();
@@ -158,10 +175,20 @@ async function submit() {
     remark: form.value.remark,
   };
   if (editingId.value) {
-    await ringStore.updateRing(editingId.value, payload);
-    ElMessage.success(`已更新环志记录 ${payload.ringNo}`);
+    try {
+      await ringStore.updateRing(editingId.value, payload);
+      ElMessage.success(`已更新环志记录 ${payload.ringNo}`);
+    } catch (error) {
+      ElMessage.error((error as Error).message);
+      return;
+    }
   } else {
-    await ringStore.addRing(payload);
+    try {
+      await ringStore.addRing(payload);
+    } catch (error) {
+      ElMessage.error((error as Error).message);
+      return;
+    }
     ElMessage.success(`已登记环志记录 ${payload.ringNo}（${payload.speciesCn}）`);
   }
   dialogVisible.value = false;
@@ -173,12 +200,20 @@ function showHistory(ringNo: string) {
 }
 
 async function remove(record: RingRecord) {
+  if (isLocked(record)) {
+    ElMessage.warning('该环志所属批次已关账，记录只读，不能删除');
+    return;
+  }
   const confirmed = await ElMessageBox.confirm(`确认删除环志记录 ${record.ringNo}（${record.speciesCn}）？`, '删除确认', { type: 'warning' })
     .then(() => true)
     .catch(() => false);
   if (!confirmed) return;
-  await ringStore.removeRing(record.id);
-  ElMessage.success('已删除');
+  try {
+    await ringStore.removeRing(record.id);
+    ElMessage.success('已删除');
+  } catch (error) {
+    ElMessage.error((error as Error).message);
+  }
 }
 
 const historyRows = computed(() => ringStore.historyOf(historyRingNo.value));
@@ -226,6 +261,15 @@ const historyRows = computed(() => ringStore.historyOf(historyRingNo.value));
             <el-tag :type="STATUS_COLOR[scope.row.status as RingStatus]" size="small">{{ scope.row.status }}</el-tag>
           </template>
         </el-table-column>
+        <el-table-column label="量度" min-width="150">
+          <template #default="scope">
+            <el-tag v-if="measureStore.byRing(scope.row.id)" type="success" size="small">已量度</el-tag>
+            <el-tooltip v-else-if="scope.row.unmeasuredReason" :content="`未测原因：${scope.row.unmeasuredReason}`" placement="top">
+              <el-tag type="info" size="small">未测：{{ scope.row.unmeasuredReason }}</el-tag>
+            </el-tooltip>
+            <el-tag v-else type="danger" size="small">未量度</el-tag>
+          </template>
+        </el-table-column>
         <el-table-column prop="ringer" label="环志人" width="90" />
         <el-table-column label="鸟点" width="140">
           <template #default="scope">{{ siteStore.siteName(scope.row.siteId) }}</template>
@@ -233,8 +277,9 @@ const historyRows = computed(() => ringStore.historyOf(historyRingNo.value));
         <el-table-column label="操作" width="200" fixed="right">
           <template #default="scope">
             <el-button link type="primary" @click="showHistory(scope.row.ringNo)">历史</el-button>
-            <el-button link type="primary" @click="openEdit(scope.row)">编辑</el-button>
-            <el-button link type="danger" @click="remove(scope.row)">删除</el-button>
+            <el-button v-if="!isLocked(scope.row)" link type="primary" @click="openEdit(scope.row)">编辑</el-button>
+            <el-button v-if="!isLocked(scope.row)" link type="danger" @click="remove(scope.row)">删除</el-button>
+            <el-tag v-else type="info" size="small" effect="plain">已关账只读</el-tag>
           </template>
         </el-table-column>
       </el-table>
@@ -292,7 +337,12 @@ const historyRows = computed(() => ringStore.historyOf(historyRingNo.value));
         </el-form-item>
         <el-form-item label="调查批次">
           <el-select v-model="form.sessionId" style="width: 240px">
-            <el-option v-for="session in sessionStore.sessions" :key="session.id" :label="`${session.sessionNo} · ${session.date}`" :value="session.id" />
+            <el-option
+              v-for="session in selectableSessions"
+              :key="session.id"
+              :label="`${session.sessionNo} · ${session.date}`"
+              :value="session.id"
+            />
           </el-select>
         </el-form-item>
         <el-form-item label="备注">
@@ -306,7 +356,7 @@ const historyRows = computed(() => ringStore.historyOf(historyRingNo.value));
       </template>
     </el-dialog>
 
-    <el-dialog v-model="historyVisible" :title="`环号历史记录 · ${historyRingNo}`" width="720px">
+    <el-dialog v-model="historyVisible" :title="`环号历史记录 · ${historyRingNo}`" width="780px">
       <el-table :data="historyRows" size="small" border>
         <el-table-column prop="ringNo" label="环号" width="110" />
         <el-table-column prop="speciesCn" label="鸟种" width="110" />
@@ -316,6 +366,13 @@ const historyRows = computed(() => ringStore.historyOf(historyRingNo.value));
         <el-table-column prop="status" label="状态" width="90" />
         <el-table-column prop="netNo" label="网号" width="100" />
         <el-table-column prop="ringer" label="环志人" width="90" />
+        <el-table-column label="量度" width="200">
+          <template #default="scope">
+            <el-tag v-if="measureStore.byRing(scope.row.id)" type="success" size="small">已量度</el-tag>
+            <el-tag v-else-if="scope.row.unmeasuredReason" type="info" size="small">未测：{{ scope.row.unmeasuredReason }}</el-tag>
+            <el-tag v-else type="danger" size="small">未量度</el-tag>
+          </template>
+        </el-table-column>
         <el-table-column prop="remark" label="备注" show-overflow-tooltip />
       </el-table>
       <template #footer>

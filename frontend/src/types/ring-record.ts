@@ -31,6 +31,8 @@ export interface RingRecord {
   siteId: string;
   /** 调查批次 id */
   sessionId: string;
+  /** 未测量度原因（关账前逐项确认；补足量度后清空） */
+  unmeasuredReason?: string;
   /** 备注 */
   remark?: string;
 }
@@ -49,3 +51,6 @@ export const STATUS_COLOR: Record<RingStatus, string> = {
   重捕: 'warning',
   回收: 'danger',
 };
+
+/** 未测量度原因预设（可在下拉中自定义补充） */
+export const UNMEASURED_REASONS: string[] = ['伤重逃逸', '羽毛污损无法量翅', '个体死亡仅登记环号', '设备故障未及测量', '雨天羽毛湿透未测', '其他'];

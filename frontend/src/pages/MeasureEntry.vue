@@ -6,12 +6,14 @@ import SpeciesPicker from '../components/common/SpeciesPicker.vue';
 import EmptyPanel from '../components/common/EmptyPanel.vue';
 import { useRingStore } from '../stores/ringStore';
 import { useMeasureStore } from '../stores/measureStore';
+import { useSessionStore } from '../stores/sessionStore';
 import { MEASURE_FIELDS, type MeasureKey, type Morphometrics } from '../types/morphometrics';
 import { deviationsOf, measureMeans } from '../utils/stats';
 import { formatDateTime } from '../utils/format';
 
 const ringStore = useRingStore();
 const measureStore = useMeasureStore();
+const sessionStore = useSessionStore();
 
 const selectedRingId = ref(ringStore.rings[0]?.id ?? '');
 const speciesCn = ref(ringStore.rings[0]?.speciesCn ?? '红喉歌鸲');
@@ -47,6 +49,8 @@ const ringOptions = computed(() =>
 );
 
 const selectedRing = computed(() => ringStore.rings.find((record) => record.id === selectedRingId.value));
+/** 所属批次已关账的环志只读，不能再录入或改删量度 */
+const selectedLocked = computed(() => Boolean(selectedRing.value && sessionStore.isClosed(selectedRing.value.sessionId)));
 
 const meansBySpecies = computed(() => measureMeans(ringStore.rings, measureStore.morphs));
 const currentMeans = computed(() => meansBySpecies.value[speciesCn.value]);
@@ -87,6 +91,7 @@ const morphRows = computed(() =>
       morph,
       ringNo: ring?.ringNo ?? '未知环号',
       species,
+      locked: Boolean(ring && sessionStore.isClosed(ring.sessionId)),
       warnings: deviations.filter((item) => item.level !== '正常'),
     };
   }),
@@ -112,6 +117,10 @@ function openCreate() {
     ElMessage.warning('请先选择一条环志记录');
     return;
   }
+  if (selectedLocked.value) {
+    ElMessage.warning('该环志所属批次已关账，量度只读');
+    return;
+  }
   editingId.value = '';
   formRef.value?.clearValidate();
   const means = currentMeans.value;
@@ -130,6 +139,11 @@ function openCreate() {
 }
 
 function openEdit(morph: Morphometrics) {
+  const ring = ringStore.rings.find((record) => record.id === morph.ringId);
+  if (ring && sessionStore.isClosed(ring.sessionId)) {
+    ElMessage.warning('该量度所属批次已关账，只读');
+    return;
+  }
   editingId.value = morph.id;
   form.value = {
     billLength: morph.billLength,
@@ -165,27 +179,41 @@ async function submit() {
     measuredAt: new Date(`${form.value.measuredAt}T09:00:00`).toISOString(),
   };
   const warnings = liveDeviations.value.filter((item) => item.level !== '正常');
-  if (editingId.value) {
-    await measureStore.updateMorph(editingId.value, payload);
-    ElMessage.success(`已更新 ${selectedRing.value.ringNo} 的量度记录`);
-  } else {
-    await measureStore.addMorph(payload);
-    ElMessage.success(
-      warnings.length
-        ? `已录入 ${selectedRing.value.ringNo} 量度，${warnings.length} 项偏离同鸟种常见区间，请复核`
-        : `已录入 ${selectedRing.value.ringNo} 量度，各项均在常见区间内`,
-    );
+  try {
+    if (editingId.value) {
+      await measureStore.updateMorph(editingId.value, payload);
+      ElMessage.success(`已更新 ${selectedRing.value.ringNo} 的量度记录`);
+    } else {
+      await measureStore.addMorph(payload);
+      ElMessage.success(
+        warnings.length
+          ? `已录入 ${selectedRing.value.ringNo} 量度，${warnings.length} 项偏离同鸟种常见区间，请复核`
+          : `已录入 ${selectedRing.value.ringNo} 量度，各项均在常见区间内`,
+      );
+    }
+  } catch (error) {
+    ElMessage.error((error as Error).message);
+    return;
   }
   dialogVisible.value = false;
 }
 
 async function remove(morph: Morphometrics) {
+  const ring = ringStore.rings.find((record) => record.id === morph.ringId);
+  if (ring && sessionStore.isClosed(ring.sessionId)) {
+    ElMessage.warning('该量度所属批次已关账，只读');
+    return;
+  }
   const confirmed = await ElMessageBox.confirm('确认删除该量度记录？', '删除确认', { type: 'warning' })
     .then(() => true)
     .catch(() => false);
   if (!confirmed) return;
-  await measureStore.removeMorph(morph.id);
-  ElMessage.success('已删除');
+  try {
+    await measureStore.removeMorph(morph.id);
+    ElMessage.success('已删除');
+  } catch (error) {
+    ElMessage.error((error as Error).message);
+  }
 }
 </script>
 
@@ -200,9 +228,16 @@ async function remove(morph: Morphometrics) {
         <el-select v-model="selectedRingId" filterable placeholder="按环号 / 鸟种搜索" style="width: 320px">
           <el-option v-for="item in ringOptions" :key="item.value" :label="item.label" :value="item.value" />
         </el-select>
-        <el-button type="primary" :disabled="!selectedRing" @click="openCreate">录入量度</el-button>
-        <el-tag v-if="selectedRing" type="success" effect="plain">
-          已选 {{ selectedRing.ringNo }} · {{ selectedRing.speciesCn }} · {{ selectedRing.age }}
+        <el-button type="primary" :disabled="!selectedRing || selectedLocked" @click="openCreate">录入量度</el-button>
+        <el-tag v-if="selectedRing" :type="selectedLocked ? 'info' : 'success'" effect="plain">
+          已选 {{ selectedRing.ringNo }} · {{ selectedRing.speciesCn }} · {{ selectedRing.age }}{{ selectedLocked ? ' · 已关账只读' : '' }}
+        </el-tag>
+        <el-tag
+          v-if="selectedRing && !measureStore.byRing(selectedRing.id) && selectedRing.unmeasuredReason"
+          type="warning"
+          effect="plain"
+        >
+          未测原因：{{ selectedRing.unmeasuredReason }}
         </el-tag>
       </div>
       <SpeciesPicker v-model:species-cn="speciesCn" v-model:species-sci="speciesSci" label="比对鸟种" />
@@ -268,10 +303,11 @@ async function remove(morph: Morphometrics) {
             <el-table-column label="测量人 / 时间" width="170">
               <template #default="scope">{{ scope.row.morph.measuredBy }} · {{ formatDateTime(scope.row.morph.measuredAt) }}</template>
             </el-table-column>
-            <el-table-column label="操作" width="130" fixed="right">
+            <el-table-column label="操作" width="150" fixed="right">
               <template #default="scope">
-                <el-button link type="primary" @click="openEdit(scope.row.morph)">编辑</el-button>
-                <el-button link type="danger" @click="remove(scope.row.morph)">删除</el-button>
+                <el-button v-if="!scope.row.locked" link type="primary" @click="openEdit(scope.row.morph)">编辑</el-button>
+                <el-button v-if="!scope.row.locked" link type="danger" @click="remove(scope.row.morph)">删除</el-button>
+                <el-tag v-else type="info" size="small" effect="plain">已关账只读</el-tag>
               </template>
             </el-table-column>
           </el-table>
